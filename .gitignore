@@ -1,0 +1,46 @@
+# Dependency directories
+node_modules/
+venv/
+.env
+
+# Build artifacts
+*.log
+*.lock
+*.pid
+*.pyc
+*.db
+
+# Temporary files
+.DS_Store
+Thumbs.db
+
+# IDE or editor-specific files
+.vscode/
+.idea/
+.project
+*.iml
+
+# Environment-specific files
+.env
+
+# Generated files
+dist/
+build/
+*.jar
+target/
+
+# Logs and runtime data
+logs/
+*.log
+
+# User-specific files
+.history/
+.bash_history
+.bash_sessions/
+
+# Config files
+config.json
+
+# Operating System files
+Desktop.ini
+.Trashes/
