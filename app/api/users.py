@@ -182,7 +182,7 @@ async def login(user: UserLogin):
     return {"access_token": access_token, "token_type": "bearer", "message": "Login Successful", "email": user.email, "user_id": user_data["cust_id"], "username": user_data["cust_username"], "imageUrl": user_data["imageUrl"]}
 
 
-uploads_folder = "E:/Project_Whip_Up/backend/uploads"
+uploads_folder = "uploads"
 
 @app.post("/upload-image/")
 async def upload_user_image(
@@ -209,6 +209,8 @@ async def upload_user_image(
         with open(file_path, "wb") as image_file:
             shutil.copyfileobj(image.file, image_file)
 
+        file_path = file_path.replace("\\", "/")
+
         # Update the user's image URL in the database
         # Replace this with your actual MongoDB update logic
         db.users.update_one(
@@ -225,7 +227,7 @@ async def upload_user_image(
         )
 
 
-profile_pictures_folder = 'E:/Project_Whip_Up/backend/uploads/profile_pictures'
+profile_pictures_folder = 'uploads/profile_pictures'
 
 @app.get("/profile-picture/{file_path:path}")
 async def get_profile_picture(file_path: str):

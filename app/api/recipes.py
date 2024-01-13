@@ -34,7 +34,7 @@ async def add_recipe(recipe: RecipeDetails):
     return {"message": "Recipe added successfully", "recipe": recipe_data}
 
 
-uploads_folder = "E:/Project_Whip_Up/backend/uploads"
+uploads_folder = "uploads"
 
 @app.post("/upload-recipe-image/")
 async def upload_user_image(
@@ -72,7 +72,7 @@ async def upload_user_image(
         )
 
 
-recipes_folder = 'E:/Project_Whip_Up/backend/uploads/recipes'
+recipes_folder = 'uploads/recipes'
 
 # Fetching Recipes
 
