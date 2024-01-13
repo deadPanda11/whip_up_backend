@@ -36,6 +36,7 @@ async def add_recipe(recipe: RecipeDetails):
 
 uploads_folder = "uploads"
 
+
 @app.post("/upload-recipe-image/")
 async def upload_user_image(
     user_email: str = Form(...),
@@ -55,7 +56,8 @@ async def upload_user_image(
             os.makedirs(recipes_folder)
 
         # Generate a unique filename for the uploaded image
-        file_path = os.path.join(recipes_folder, f"recipe_image_{str(uuid.uuid4())}.jpg")
+        file_path = os.path.join(
+            recipes_folder, f"recipe_image_{str(uuid.uuid4())}.jpg")
 
         # Save the uploaded file
         with open(file_path, "wb") as image_file:
@@ -64,7 +66,8 @@ async def upload_user_image(
         file_path = file_path.replace("\\", "/")
 
         return JSONResponse(
-            content={"message": "Image uploaded successfully", "imageUrl": file_path}
+            content={"message": "Image uploaded successfully",
+                     "imageUrl": file_path}
         )
     except Exception as e:
         return JSONResponse(
@@ -75,6 +78,7 @@ async def upload_user_image(
 recipes_folder = 'uploads/recipes'
 
 # Fetching Recipes
+
 
 @app.get("/getrecipes/")
 async def get_all_recipes(user_data: dict = Depends(get_current_user)):
@@ -89,17 +93,19 @@ async def get_all_recipes(user_data: dict = Depends(get_current_user)):
 
     return {"recipes": recipes_list}
 
+
 @app.get("/recipe-image/{file_path:path}")
 async def recipe_image(file_path: str):
     file_name = os.path.basename(file_path)
     full_path = os.path.join(recipes_folder, file_name)
-    
+
     if os.path.isfile(full_path):
         return FileResponse(full_path)
     else:
         raise HTTPException(status_code=404, detail="File not found")
 
 # Get Each Recipe
+
 
 @app.get("/getrecipe/{recipe_id}")
 async def get_recipe_by_id(recipe_id: str, user_data: dict = Depends(get_current_user)):
@@ -178,3 +184,45 @@ async def get_bookmarked_recipes(user_data: dict = Depends(get_current_user)):
         # Assuming you're using MongoDB
         recipes = list(db.recipes.find({"_id": {"$in": recipe_ids}}))
         return {"recipes": recipes}
+
+
+@app.post("/like/{user_id}/{recipe_id}/")
+async def change_likes(user_id: str, recipe_id: str):
+    like = db.likes.find_one(
+        {'cust_id': user_id, 'recipe_id': recipe_id})
+    if not like:
+        like_data = {
+            "cust_id": user_id,
+            "recipe_id": recipe_id,
+            "status": 1
+        }
+        db.likes.insert_one(like_data)
+        return {"status": "liked"}
+
+    else:
+        if (like["status"] == 1):
+            db.likes.update_one(
+                {"cust_id": user_id, "recipe_id": recipe_id},
+                {"$set": {"status": 0}}
+            )
+            return {"status": "unliked"}
+        else:
+            db.likes.update_one(
+                {"cust_id": user_id, "recipe_id": recipe_id},
+                {"$set": {"status": 1}}
+            )
+            return {"status": "unliked"}
+
+
+@app.get("/getlike/{user_id}/{recipe_id}/")
+async def get_likes(user_id: str, recipe_id: str):
+    like = db.likes.find_one(
+        {'cust_id': user_id, 'recipe_id': recipe_id})
+    if not like:
+        print("no")
+        return {"status": "no"}
+    else:
+        if (like["status"] == 1):
+            return {"status": "yes"}
+        else:
+            return {"status": "no"}

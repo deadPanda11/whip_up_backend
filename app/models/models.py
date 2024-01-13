@@ -68,3 +68,9 @@ class Bookmarks(BaseModel):
     cust_id: str
     recipe_id: str
     status: int
+
+
+class Likes(BaseModel):
+    cust_id: str
+    recipe_id: str
+    status: int
