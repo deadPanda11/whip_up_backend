@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Depends, Form, HTTPException,  File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from app.api.users import get_current_user
-from app.models.models import RecipeDetails
+from app.models.models import RecipeDetails, RecipeReview
 from bson import ObjectId
 from app.db.connection import db
 import shutil
 import os
 import uuid
+from datetime import datetime
+from typing import Optional
 
 
 app = APIRouter()
@@ -36,6 +38,7 @@ async def add_recipe(recipe: RecipeDetails):
 
 uploads_folder = "uploads"
 
+
 @app.post("/upload-recipe-image/")
 async def upload_user_image(
     user_email: str = Form(...),
@@ -55,7 +58,8 @@ async def upload_user_image(
             os.makedirs(recipes_folder)
 
         # Generate a unique filename for the uploaded image
-        file_path = os.path.join(recipes_folder, f"recipe_image_{str(uuid.uuid4())}.jpg")
+        file_path = os.path.join(
+            recipes_folder, f"recipe_image_{str(uuid.uuid4())}.jpg")
 
         # Save the uploaded file
         with open(file_path, "wb") as image_file:
@@ -64,7 +68,8 @@ async def upload_user_image(
         file_path = file_path.replace("\\", "/")
 
         return JSONResponse(
-            content={"message": "Image uploaded successfully", "imageUrl": file_path}
+            content={"message": "Image uploaded successfully",
+                     "imageUrl": file_path}
         )
     except Exception as e:
         return JSONResponse(
@@ -75,6 +80,7 @@ async def upload_user_image(
 recipes_folder = 'uploads/recipes'
 
 # Fetching Recipes
+
 
 @app.get("/getrecipes/")
 async def get_all_recipes(user_data: dict = Depends(get_current_user)):
@@ -89,17 +95,19 @@ async def get_all_recipes(user_data: dict = Depends(get_current_user)):
 
     return {"recipes": recipes_list}
 
+
 @app.get("/recipe-image/{file_path:path}")
 async def recipe_image(file_path: str):
     file_name = os.path.basename(file_path)
     full_path = os.path.join(recipes_folder, file_name)
-    
+
     if os.path.isfile(full_path):
         return FileResponse(full_path)
     else:
         raise HTTPException(status_code=404, detail="File not found")
 
 # Get Each Recipe
+
 
 @app.get("/getrecipe/{recipe_id}")
 async def get_recipe_by_id(recipe_id: str, user_data: dict = Depends(get_current_user)):
@@ -178,3 +186,104 @@ async def get_bookmarked_recipes(user_data: dict = Depends(get_current_user)):
         # Assuming you're using MongoDB
         recipes = list(db.recipes.find({"_id": {"$in": recipe_ids}}))
         return {"recipes": recipes}
+
+
+@app.post("/like/{user_id}/{recipe_id}/")
+async def change_likes(user_id: str, recipe_id: str):
+    like = db.likes.find_one(
+        {'cust_id': user_id, 'recipe_id': recipe_id})
+    if not like:
+        like_data = {
+            "cust_id": user_id,
+            "recipe_id": recipe_id,
+            "status": 1
+        }
+        db.likes.insert_one(like_data)
+        return {"status": "liked"}
+
+    else:
+        if (like["status"] == 1):
+            db.likes.update_one(
+                {"cust_id": user_id, "recipe_id": recipe_id},
+                {"$set": {"status": 0}}
+            )
+            return {"status": "unliked"}
+        else:
+            db.likes.update_one(
+                {"cust_id": user_id, "recipe_id": recipe_id},
+                {"$set": {"status": 1}}
+            )
+            return {"status": "unliked"}
+
+
+@app.get("/getlike/{user_id}/{recipe_id}/")
+async def get_likes(user_id: str, recipe_id: str):
+    like = db.likes.find_one(
+        {'cust_id': user_id, 'recipe_id': recipe_id})
+    if not like:
+        print("no")
+        return {"status": "no"}
+    else:
+        if (like["status"] == 1):
+            return {"status": "yes"}
+        else:
+            return {"status": "no"}
+        
+
+@app.post("/postreview/")
+# async def post_review(review: RecipeReview, user_data: dict = Depends(get_current_user)):
+async def post_review(review: RecipeReview):
+    # Here you can include additional data such as timestamp
+    review_data = review.dict()
+    review_data['timestamp'] = datetime.utcnow()
+    db.reviews.insert_one(review_data)
+    return {"message": "Review posted successfully"}
+
+
+
+
+@app.get("/getreviews/{recipe_id}/")
+async def get_reviews(recipe_id: str):
+    reviews = list(db.reviews.find({"recipe_id": recipe_id}))
+    for review in reviews:
+        # Assuming 'timestamp' is a datetime object, format it to a date string.
+        review['timestamp'] = review['timestamp'].strftime('%Y-%m-%d')
+        review['_id'] = str(review['_id'])  # Convert ObjectId to str
+    return {"reviews": reviews}
+
+
+#Search 
+
+@app.on_event("startup")
+async def startup_event():
+   
+    # Create text indexes, if they don't exist already
+    try:
+        db.recipes.create_index([
+            ('title', 'text'),
+            ('cuisine', 'text'),
+            ('tags', 'text')
+            #('ingredients.name', 'text')
+        ])
+        print("Text indexes created.")
+    except OperationFailure as e:
+        print("An error occurred while creating indexes:", e)
+
+
+@app.get("/search/")
+def search(query: str,  user_data: dict = Depends(get_current_user)):
+    if not query:
+        return {"results": []}
+
+    # Perform a text search on the 'recipes' collection using the provided 'query'
+    recipes_cursor = db.recipes.find({"$text": {"$search": query}})
+    
+    # Convert the cursor to a list
+    recipes_list = []
+    for recipe in recipes_cursor:
+        recipe_id = str(recipe['_id'])  # Convert ObjectId to string
+        print(f"Recipe ID: {recipe_id}")  # Print the ID
+        recipe['_id'] = recipe_id
+        recipes_list.append(recipe)
+    
+    return {"results": recipes_list}
