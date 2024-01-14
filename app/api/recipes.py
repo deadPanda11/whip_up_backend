@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Form, HTTPException,  File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from app.api.users import get_current_user
-from app.models.models import RecipeDetails
+from app.models.models import RecipeDetails, Likes
 from bson import ObjectId
 from app.db.connection import db
 import shutil
@@ -91,6 +91,13 @@ async def get_all_recipes(user_data: dict = Depends(get_current_user)):
     for recipe in recipes_list:
         recipe["_id"] = str(recipe["_id"])
 
+        # Fetch total likes for each recipe
+        likes_count = db.likes.count_documents(
+            {"recipe_id": recipe["_id"], "status": 1})
+        recipe["total_likes"] = likes_count
+
+    print(recipes_list)
+
     return {"recipes": recipes_list}
 
 
@@ -116,7 +123,12 @@ async def get_recipe_by_id(recipe_id: str, user_data: dict = Depends(get_current
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
 
-    return {"recipe": recipe}
+    # Assuming status 1 is for likes
+    likes_cursor = db.likes.find({"recipe_id": recipe_id, "status": 1})
+    total_likes = likes_cursor.count()
+    print(total_likes)
+
+    return {"recipe": recipe, "total_likes": total_likes}
 
 
 @app.get("/getmyrecipes/")
@@ -125,6 +137,14 @@ async def get_my_recipes(user_data: dict = Depends(get_current_user)):
     userId = user_data.get("cust_id")
 
     recipes = list(db.recipes.find({"userId": userId}))
+    for recipe in recipes:
+        recipe["_id"] = str(recipe["_id"])
+
+        # Fetch total likes for each recipe
+        likes_count = db.likes.count_documents(
+            {"recipe_id": recipe["_id"], "status": 1})
+        recipe["total_likes"] = likes_count
+
     print(recipes)
 
     return {"recipes": recipes}
