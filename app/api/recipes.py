@@ -9,6 +9,7 @@ import os
 import uuid
 from datetime import datetime
 from typing import Optional
+from pymongo.errors import OperationFailure
 
 
 app = APIRouter()
@@ -205,6 +206,14 @@ async def get_bookmarked_recipes(user_data: dict = Depends(get_current_user)):
         recipe_ids = [bookmark["recipe_id"] for bookmark in bookmarks]
         # Assuming you're using MongoDB
         recipes = list(db.recipes.find({"_id": {"$in": recipe_ids}}))
+        for recipe in recipes:
+            recipe["_id"] = str(recipe["_id"])
+
+        # Fetch total likes for each recipe
+            likes_count = db.likes.count_documents(
+                {"recipe_id": recipe["_id"], "status": 1})
+            recipe["total_likes"] = likes_count
+
         return {"recipes": recipes}
 
 
@@ -245,8 +254,10 @@ async def get_likes(user_id: str, recipe_id: str):
         return {"status": "no"}
     else:
         if (like["status"] == 1):
+            print("yes")
             return {"status": "yes"}
         else:
+            print("yes")
             return {"status": "no"}
 
 
