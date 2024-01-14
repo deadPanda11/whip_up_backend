@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Depends, Form, HTTPException,  File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from app.api.users import get_current_user
-from app.models.models import RecipeDetails
+from app.models.models import RecipeDetails, RecipeReview
 from bson import ObjectId
 from app.db.connection import db
 import shutil
 import os
 import uuid
+from datetime import datetime
+from typing import Optional
 
 
 app = APIRouter()
@@ -226,3 +228,62 @@ async def get_likes(user_id: str, recipe_id: str):
             return {"status": "yes"}
         else:
             return {"status": "no"}
+        
+
+@app.post("/postreview/")
+# async def post_review(review: RecipeReview, user_data: dict = Depends(get_current_user)):
+async def post_review(review: RecipeReview):
+    # Here you can include additional data such as timestamp
+    review_data = review.dict()
+    review_data['timestamp'] = datetime.utcnow()
+    db.reviews.insert_one(review_data)
+    return {"message": "Review posted successfully"}
+
+
+
+
+@app.get("/getreviews/{recipe_id}/")
+async def get_reviews(recipe_id: str):
+    reviews = list(db.reviews.find({"recipe_id": recipe_id}))
+    for review in reviews:
+        # Assuming 'timestamp' is a datetime object, format it to a date string.
+        review['timestamp'] = review['timestamp'].strftime('%Y-%m-%d')
+        review['_id'] = str(review['_id'])  # Convert ObjectId to str
+    return {"reviews": reviews}
+
+
+#Search 
+
+@app.on_event("startup")
+async def startup_event():
+   
+    # Create text indexes, if they don't exist already
+    try:
+        db.recipes.create_index([
+            ('title', 'text'),
+            ('cuisine', 'text'),
+            ('tags', 'text')
+            #('ingredients.name', 'text')
+        ])
+        print("Text indexes created.")
+    except OperationFailure as e:
+        print("An error occurred while creating indexes:", e)
+
+
+@app.get("/search/")
+def search(query: str,  user_data: dict = Depends(get_current_user)):
+    if not query:
+        return {"results": []}
+
+    # Perform a text search on the 'recipes' collection using the provided 'query'
+    recipes_cursor = db.recipes.find({"$text": {"$search": query}})
+    
+    # Convert the cursor to a list
+    recipes_list = []
+    for recipe in recipes_cursor:
+        recipe_id = str(recipe['_id'])  # Convert ObjectId to string
+        print(f"Recipe ID: {recipe_id}")  # Print the ID
+        recipe['_id'] = recipe_id
+        recipes_list.append(recipe)
+    
+    return {"results": recipes_list}

@@ -74,3 +74,14 @@ class Likes(BaseModel):
     cust_id: str
     recipe_id: str
     status: int
+
+
+
+
+# REVIEWS
+    
+class RecipeReview(BaseModel):
+    recipe_id: str
+    user_id: str
+    comment: str
+    rating: float 

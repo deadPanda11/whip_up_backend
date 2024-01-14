@@ -13,5 +13,13 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deadPanda11/whip_up_backend.git"
+  },
+  "bugs": {
+    "url": "https://github.com/deadPanda11/whip_up_backend/issues"
+  },
+  "homepage": "https://github.com/deadPanda11/whip_up_backend#readme",
   "description": ""
 }
