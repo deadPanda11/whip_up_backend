@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Form, HTTPException,  File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from app.api.users import get_current_user
-from app.models.models import RecipeDetails, RecipeReview
+from app.models.models import RecipeDetails, RecipeReview, Likes
 from bson import ObjectId
 from app.db.connection import db
 import shutil
@@ -93,6 +93,13 @@ async def get_all_recipes(user_data: dict = Depends(get_current_user)):
     for recipe in recipes_list:
         recipe["_id"] = str(recipe["_id"])
 
+        # Fetch total likes for each recipe
+        likes_count = db.likes.count_documents(
+            {"recipe_id": recipe["_id"], "status": 1})
+        recipe["total_likes"] = likes_count
+
+    print(recipes_list)
+
     return {"recipes": recipes_list}
 
 
@@ -118,7 +125,12 @@ async def get_recipe_by_id(recipe_id: str, user_data: dict = Depends(get_current
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
 
-    return {"recipe": recipe}
+    # Assuming status 1 is for likes
+    likes_cursor = db.likes.find({"recipe_id": recipe_id, "status": 1})
+    total_likes = likes_cursor.count()
+    print(total_likes)
+
+    return {"recipe": recipe, "total_likes": total_likes}
 
 
 @app.get("/getmyrecipes/")
@@ -127,6 +139,14 @@ async def get_my_recipes(user_data: dict = Depends(get_current_user)):
     userId = user_data.get("cust_id")
 
     recipes = list(db.recipes.find({"userId": userId}))
+    for recipe in recipes:
+        recipe["_id"] = str(recipe["_id"])
+
+        # Fetch total likes for each recipe
+        likes_count = db.likes.count_documents(
+            {"recipe_id": recipe["_id"], "status": 1})
+        recipe["total_likes"] = likes_count
+
     print(recipes)
 
     return {"recipes": recipes}
@@ -228,7 +248,7 @@ async def get_likes(user_id: str, recipe_id: str):
             return {"status": "yes"}
         else:
             return {"status": "no"}
-        
+
 
 @app.post("/postreview/")
 # async def post_review(review: RecipeReview, user_data: dict = Depends(get_current_user)):
@@ -238,8 +258,6 @@ async def post_review(review: RecipeReview):
     review_data['timestamp'] = datetime.utcnow()
     db.reviews.insert_one(review_data)
     return {"message": "Review posted successfully"}
-
-
 
 
 @app.get("/getreviews/{recipe_id}/")
@@ -252,18 +270,18 @@ async def get_reviews(recipe_id: str):
     return {"reviews": reviews}
 
 
-#Search 
+# Search
 
 @app.on_event("startup")
 async def startup_event():
-   
+
     # Create text indexes, if they don't exist already
     try:
         db.recipes.create_index([
             ('title', 'text'),
             ('cuisine', 'text'),
             ('tags', 'text')
-            #('ingredients.name', 'text')
+            # ('ingredients.name', 'text')
         ])
         print("Text indexes created.")
     except OperationFailure as e:
@@ -277,7 +295,7 @@ def search(query: str,  user_data: dict = Depends(get_current_user)):
 
     # Perform a text search on the 'recipes' collection using the provided 'query'
     recipes_cursor = db.recipes.find({"$text": {"$search": query}})
-    
+
     # Convert the cursor to a list
     recipes_list = []
     for recipe in recipes_cursor:
@@ -285,5 +303,5 @@ def search(query: str,  user_data: dict = Depends(get_current_user)):
         print(f"Recipe ID: {recipe_id}")  # Print the ID
         recipe['_id'] = recipe_id
         recipes_list.append(recipe)
-    
+
     return {"results": recipes_list}
