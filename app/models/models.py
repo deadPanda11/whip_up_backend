@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import List, Optional
+from datetime import datetime
 
 
 class UserIn(BaseModel):
@@ -62,6 +63,7 @@ class RecipeDetails(BaseModel):
     ingredients: List[RecipeIngredient]
     steps: List[RecipeStep]
     imageUrl: str
+   
 
 
 class Bookmarks(BaseModel):
@@ -76,9 +78,16 @@ class Likes(BaseModel):
     status: int
 
 
+class Notification(BaseModel):
+    
+    recipient_id: str
+    message: str
+    recipe_id: str
+    read: bool = False
+    timestamp: datetime = datetime.utcnow()
 
 
-# REVIEWS
+# # REVIEWS
     
 class RecipeReview(BaseModel):
     recipe_id: str
@@ -86,3 +95,5 @@ class RecipeReview(BaseModel):
     username: str = ''
     comment: str
     rating: float 
+    
+
