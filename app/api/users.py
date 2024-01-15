@@ -184,6 +184,7 @@ async def login(user: UserLogin):
 
 uploads_folder = "uploads"
 
+
 @app.post("/upload-image/")
 async def upload_user_image(
     user_email: str = Form(...),
@@ -198,12 +199,14 @@ async def upload_user_image(
             os.makedirs(uploads_folder)
 
         # Ensure the profile_pictures folder exists within uploads
-        profile_pictures_folder = os.path.join(uploads_folder, "profile_pictures")
+        profile_pictures_folder = os.path.join(
+            uploads_folder, "profile_pictures")
         if not os.path.exists(profile_pictures_folder):
             os.makedirs(profile_pictures_folder)
 
         # Generate a unique filename for the uploaded image
-        file_path = os.path.join(profile_pictures_folder, f"user_image_{str(uuid.uuid4())}.jpg")
+        file_path = os.path.join(
+            profile_pictures_folder, f"user_image_{str(uuid.uuid4())}.jpg")
 
         # Save the uploaded file
         with open(file_path, "wb") as image_file:
@@ -219,7 +222,8 @@ async def upload_user_image(
         )
 
         return JSONResponse(
-            content={"message": "Image uploaded successfully", "imageUrl": file_path}
+            content={"message": "Image uploaded successfully",
+                     "imageUrl": file_path}
         )
     except Exception as e:
         return JSONResponse(
@@ -229,16 +233,17 @@ async def upload_user_image(
 
 profile_pictures_folder = 'uploads/profile_pictures'
 
+
 @app.get("/profile-picture/{file_path:path}")
 async def get_profile_picture(file_path: str):
     file_name = os.path.basename(file_path)
     full_path = os.path.join(profile_pictures_folder, file_name)
-    
+
     if os.path.isfile(full_path):
         return FileResponse(full_path)
     else:
         raise HTTPException(status_code=404, detail="File not found")
-    
+
 
 @app.post("/reset-password/")
 async def reset_password(user: resetPass):
@@ -274,6 +279,16 @@ async def reset_password(user: resetPass):
 @app.get("/profile/{user_email}/")
 async def get_user_profile(user_email: str):
     user_data = db.users.find_one({'cust_email': user_email})
+    if not user_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    return {"email": user_data["cust_email"], "username": user_data["cust_username"], "imageUrl": user_data["imageUrl"], "bio": user_data["bio"]}
+
+
+@app.get("/posterprofile/{user_id}/")
+async def get_poster_profile(user_id: str):
+    user_data = db.users.find_one({'cust_id': user_id})
+    print(user_data)
     if not user_data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
