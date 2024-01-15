@@ -139,6 +139,14 @@ async def get_my_recipes(user_data: dict = Depends(get_current_user)):
     userId = user_data.get("cust_id")
 
     recipes = list(db.recipes.find({"userId": userId}))
+    for recipe in recipes:
+        recipe["_id"] = str(recipe["_id"])
+
+        # Fetch total likes for each recipe
+        likes_count = db.likes.count_documents(
+            {"recipe_id": recipe["_id"], "status": 1})
+        recipe["total_likes"] = likes_count
+
     print(recipes)
 
     return {"recipes": recipes}
