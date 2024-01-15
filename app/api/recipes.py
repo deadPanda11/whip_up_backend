@@ -9,6 +9,7 @@ import os
 import uuid
 from datetime import datetime
 from typing import Optional
+from pymongo.errors import OperationFailure
 
 
 app = APIRouter()
@@ -185,10 +186,59 @@ async def get_bookmarked_recipes(user_data: dict = Depends(get_current_user)):
         recipe_ids = [bookmark["recipe_id"] for bookmark in bookmarks]
         # Assuming you're using MongoDB
         recipes = list(db.recipes.find({"_id": {"$in": recipe_ids}}))
+        for recipe in recipes:
+            recipe["_id"] = str(recipe["_id"])
+
+        # Fetch total likes for each recipe
+            likes_count = db.likes.count_documents(
+                {"recipe_id": recipe["_id"], "status": 1})
+            recipe["total_likes"] = likes_count
+
         return {"recipes": recipes}
 
 
-from bson import ObjectId
+@app.post("/like/{user_id}/{recipe_id}/")
+async def change_likes(user_id: str, recipe_id: str):
+    like = db.likes.find_one(
+        {'cust_id': user_id, 'recipe_id': recipe_id})
+    if not like:
+        like_data = {
+            "cust_id": user_id,
+            "recipe_id": recipe_id,
+            "status": 1
+        }
+        db.likes.insert_one(like_data)
+        return {"status": "liked"}
+
+    else:
+        if (like["status"] == 1):
+            db.likes.update_one(
+                {"cust_id": user_id, "recipe_id": recipe_id},
+                {"$set": {"status": 0}}
+            )
+            return {"status": "unliked"}
+        else:
+            db.likes.update_one(
+                {"cust_id": user_id, "recipe_id": recipe_id},
+                {"$set": {"status": 1}}
+            )
+            return {"status": "unliked"}
+
+
+@app.get("/getlike/{user_id}/{recipe_id}/")
+async def get_likes(user_id: str, recipe_id: str):
+    like = db.likes.find_one(
+        {'cust_id': user_id, 'recipe_id': recipe_id})
+    if not like:
+        print("no")
+        return {"status": "no"}
+    else:
+        if (like["status"] == 1):
+            print("yes")
+            return {"status": "yes"}
+        else:
+            print("yes")
+            return {"status": "no"}
 
 
 @app.post("/postreview/")
