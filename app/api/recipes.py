@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Form, HTTPException,  File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from app.api.users import get_current_user
-from app.models.models import RecipeDetails, RecipeReview, Likes
+from app.models.models import RecipeDetails, RecipeReview, Notification
 from bson import ObjectId
 from app.db.connection import db
 import shutil
@@ -85,21 +85,14 @@ recipes_folder = 'uploads/recipes'
 @app.get("/getrecipes/")
 async def get_all_recipes(user_data: dict = Depends(get_current_user)):
     recipes = db.recipes.find()
-
+    
     # Convert the recipes from Cursor type to a list of dictionaries
     recipes_list = [recipe for recipe in recipes]
-
+    
     # Convert ObjectIds to string since they're not JSON serializable
     for recipe in recipes_list:
         recipe["_id"] = str(recipe["_id"])
-
-        # Fetch total likes for each recipe
-        likes_count = db.likes.count_documents(
-            {"recipe_id": recipe["_id"], "status": 1})
-        recipe["total_likes"] = likes_count
-
-    print(recipes_list)
-
+    
     return {"recipes": recipes_list}
 
 
@@ -120,17 +113,12 @@ async def recipe_image(file_path: str):
 async def get_recipe_by_id(recipe_id: str, user_data: dict = Depends(get_current_user)):
     # Fetch the recipe with the given ID
     recipe = db.recipes.find_one({"_id": recipe_id})
-
+    
     # If recipe not found, raise an HTTP exception with a 404 status code
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
-
-    # Assuming status 1 is for likes
-    likes_cursor = db.likes.find({"recipe_id": recipe_id, "status": 1})
-    total_likes = likes_cursor.count()
-    print(total_likes)
-
-    return {"recipe": recipe, "total_likes": total_likes}
+    
+    return {"recipe": recipe}
 
 
 @app.get("/getmyrecipes/")
@@ -139,14 +127,6 @@ async def get_my_recipes(user_data: dict = Depends(get_current_user)):
     userId = user_data.get("cust_id")
 
     recipes = list(db.recipes.find({"userId": userId}))
-    for recipe in recipes:
-        recipe["_id"] = str(recipe["_id"])
-
-        # Fetch total likes for each recipe
-        likes_count = db.likes.count_documents(
-            {"recipe_id": recipe["_id"], "status": 1})
-        recipe["total_likes"] = likes_count
-
     print(recipes)
 
     return {"recipes": recipes}
@@ -208,56 +188,39 @@ async def get_bookmarked_recipes(user_data: dict = Depends(get_current_user)):
         return {"recipes": recipes}
 
 
-@app.post("/like/{user_id}/{recipe_id}/")
-async def change_likes(user_id: str, recipe_id: str):
-    like = db.likes.find_one(
-        {'cust_id': user_id, 'recipe_id': recipe_id})
-    if not like:
-        like_data = {
-            "cust_id": user_id,
-            "recipe_id": recipe_id,
-            "status": 1
-        }
-        db.likes.insert_one(like_data)
-        return {"status": "liked"}
-
-    else:
-        if (like["status"] == 1):
-            db.likes.update_one(
-                {"cust_id": user_id, "recipe_id": recipe_id},
-                {"$set": {"status": 0}}
-            )
-            return {"status": "unliked"}
-        else:
-            db.likes.update_one(
-                {"cust_id": user_id, "recipe_id": recipe_id},
-                {"$set": {"status": 1}}
-            )
-            return {"status": "unliked"}
-
-
-@app.get("/getlike/{user_id}/{recipe_id}/")
-async def get_likes(user_id: str, recipe_id: str):
-    like = db.likes.find_one(
-        {'cust_id': user_id, 'recipe_id': recipe_id})
-    if not like:
-        print("no")
-        return {"status": "no"}
-    else:
-        if (like["status"] == 1):
-            return {"status": "yes"}
-        else:
-            return {"status": "no"}
+from bson import ObjectId
 
 
 @app.post("/postreview/")
-# async def post_review(review: RecipeReview, user_data: dict = Depends(get_current_user)):
 async def post_review(review: RecipeReview):
-    # Here you can include additional data such as timestamp
     review_data = review.dict()
     review_data['timestamp'] = datetime.utcnow()
+    # Convert string to ObjectId for MongoDB operation
+    
     db.reviews.insert_one(review_data)
-    return {"message": "Review posted successfully"}
+    
+    # Fetch the recipe title and owner's ID
+    recipe = db.recipes.find_one({"_id": review.recipe_id})
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    
+    owner_id = recipe['userId']  # This should be the recipe owner's ID
+    title = recipe['title']
+    id = recipe['_id']
+    
+    # Create the notification for the recipe owner
+    notification_data = {
+        "recipient_id": owner_id,
+        "message": f"Your recipe '{id}' name '{title}' was reviewed by user {review.user_id}.",
+        "recipe_id": review.recipe_id,
+        "read": False,
+        "timestamp": datetime.utcnow()
+    }
+    # Insert the notification into the database
+    db.notifications.insert_one(notification_data)
+
+    return {"message": "Review posted successfully", "review_id": str(review_data['recipe_id'])}
+
 
 
 @app.get("/getreviews/{recipe_id}/")
@@ -270,24 +233,57 @@ async def get_reviews(recipe_id: str):
     return {"reviews": reviews}
 
 
-# Search
+#notification
+
+@app.get("/notifications/{user_id}")
+async def get_notifications(user_id: str):
+    # Ensure that user_id is valid and retrieve notifications
+    notifications = list(db.notifications.find({"recipient_id": user_id}))
+    
+    # Convert all ObjectIds to strings for JSON serialization
+    for notification in notifications:
+        notification['_id'] = str(notification['_id'])
+        notification['timestamp'] = notification['timestamp'].isoformat()
+        # Ensure all ObjectIds in 'recipe_id' are converted to strings if they are not already
+        if isinstance(notification.get('recipe_id'), ObjectId):
+            notification['recipe_id'] = str(notification['recipe_id'])
+
+    return notifications
+
+@app.patch("/notifications/{notification_id}/read")
+async def mark_notification_as_read(notification_id: str):
+    # Convert string to ObjectId for MongoDB operation
+    result = db.notifications.update_one(
+        {"_id": ObjectId(notification_id)},
+        {"$set": {"read": True}}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    return {"message": "Notification marked as read"}
+
+
+#Search 
 
 @app.on_event("startup")
 async def startup_event():
-
+   
     # Create text indexes, if they don't exist already
     try:
         db.recipes.create_index([
             ('title', 'text'),
             ('cuisine', 'text'),
             ('tags', 'text')
-            # ('ingredients.name', 'text')
+            #('ingredients.name', 'text')
         ])
         print("Text indexes created.")
     except OperationFailure as e:
         print("An error occurred while creating indexes:", e)
 
 
+
+        
 @app.get("/search/")
 def search(query: str,  user_data: dict = Depends(get_current_user)):
     if not query:
@@ -295,7 +291,7 @@ def search(query: str,  user_data: dict = Depends(get_current_user)):
 
     # Perform a text search on the 'recipes' collection using the provided 'query'
     recipes_cursor = db.recipes.find({"$text": {"$search": query}})
-
+    
     # Convert the cursor to a list
     recipes_list = []
     for recipe in recipes_cursor:
@@ -303,5 +299,6 @@ def search(query: str,  user_data: dict = Depends(get_current_user)):
         print(f"Recipe ID: {recipe_id}")  # Print the ID
         recipe['_id'] = recipe_id
         recipes_list.append(recipe)
-
+    
     return {"results": recipes_list}
+    
