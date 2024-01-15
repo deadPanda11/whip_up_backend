@@ -10,6 +10,10 @@ import uuid
 from datetime import datetime
 from typing import Optional
 from pymongo.errors import OperationFailure
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.security import OAuth2PasswordBearer
+from pymongo import MongoClient
+from typing import List
 
 
 app = APIRouter()
@@ -99,7 +103,7 @@ async def get_all_recipes(user_data: dict = Depends(get_current_user)):
             {"recipe_id": recipe["_id"], "status": 1})
         recipe["total_likes"] = likes_count
 
-    print(recipes_list)
+    # print(recipes_list)
 
     return {"recipes": recipes_list}
 
@@ -271,13 +275,27 @@ async def post_review(review: RecipeReview):
     return {"message": "Review posted successfully"}
 
 
+from bson import ObjectId
+
 @app.get("/getreviews/{recipe_id}/")
 async def get_reviews(recipe_id: str):
     reviews = list(db.reviews.find({"recipe_id": recipe_id}))
+    
     for review in reviews:
         # Assuming 'timestamp' is a datetime object, format it to a date string.
         review['timestamp'] = review['timestamp'].strftime('%Y-%m-%d')
         review['_id'] = str(review['_id'])  # Convert ObjectId to str
+        
+        # Fetch user information using user_id from the 'users' collection
+        user_id = review.get('user_id')
+        print("hello?",user_id)
+        user_info = db.users.find_one({"cust_id": user_id})
+        if user_info:
+            # Assuming the username is stored in the 'username' field
+            print("name???",user_info['cust_username'])
+            review['username'] = user_info.get('cust_username')
+
+    reviews.reverse()
     return {"reviews": reviews}
 
 
@@ -313,6 +331,145 @@ def search(query: str,  user_data: dict = Depends(get_current_user)):
         recipe_id = str(recipe['_id'])  # Convert ObjectId to string
         print(f"Recipe ID: {recipe_id}")  # Print the ID
         recipe['_id'] = recipe_id
+
+        likes_count = db.likes.count_documents(
+            {"recipe_id": recipe_id, "status": 1})
+        recipe["total_likes"] = likes_count
+
         recipes_list.append(recipe)
 
-    return {"results": recipes_list}
+    response = {"results": recipes_list}
+    return response
+
+    #Recommendation Trial Start
+
+@app.get("/recommendations/")
+async def get_top_liked_recipes(
+    user_data: dict = Depends(get_current_user)
+):
+    # Get user's liked and bookmarked recipe ids
+    user_id = user_data["cust_id"]
+    liked_recipe_ids = get_user_liked_recipe_ids(user_id)
+    bookmarked_recipe_ids = get_user_bookmarked_recipe_ids(user_id)
+
+    # Find the 3 most common recipe ids from likes and bookmarks
+    common_recipe_ids = find_most_common_recipe_ids(liked_recipe_ids, bookmarked_recipe_ids)
+    print("Common Recipe Ids: ", common_recipe_ids)
+
+    # Get cuisine and difficulty for these recipe ids
+    cuisines, difficulties = get_cuisine_and_difficulty(common_recipe_ids)
+    print("Cuisines: ", cuisines)
+    print("Difficulties: ", difficulties)
+
+    # Filter recipes based on matching cuisine or difficulty
+    filtered_recipes = filter_recipes_by_cuisine_or_difficulty(cuisines, difficulties)
+    print("\nFiltered Recipes:")
+    for recipe in filtered_recipes:
+        print(recipe.get("title", "No Title"))
+
+    # Count total likes for filtered recipes
+    recipes_with_likes = count_total_likes(filtered_recipes)
+    print("\nRecipes With Likes:")
+    for recipe in recipes_with_likes:
+        print(recipe.get("title", "No Title"))
+
+    # Sort recipes by total likes and get the top 5
+    top_liked_recipes = get_top_5_recipes(recipes_with_likes)
+    print("\nTop 5:")
+    for recipe in top_liked_recipes:
+        print(recipe.get("title", "No Title"))
+
+    # Fetch additional details for the top-liked recipes
+    detailed_top_liked_recipes = fetch_detailed_recipes_info(top_liked_recipes)
+    print("\nDetails:")
+    for recipe in detailed_top_liked_recipes:
+        print(recipe.get("title", "No Title"))
+
+    for recipe in detailed_top_liked_recipes:
+        recipe["_id"] = str(recipe["_id"])
+
+        # Fetch total likes for each recipe
+        likes_count = db.likes.count_documents(
+            {"recipe_id": recipe["_id"], "status": 1})
+        recipe["total_likes"] = likes_count
+
+    print("\nMore Details:")
+    for recipe in detailed_top_liked_recipes:
+        print(recipe.get("title", "No Title"))
+
+    return {"recipes": detailed_top_liked_recipes}
+
+
+def fetch_detailed_recipes_info(recipes: List[dict]):
+    detailed_recipes = []
+    for recipe in recipes:
+        recipe_id = recipe["_id"]
+        detailed_recipe = db.recipes.find_one({"_id": recipe_id})
+
+        if detailed_recipe:
+            detailed_recipe["_id"] = str(detailed_recipe["_id"])
+            likes_count = db.likes.count_documents({"_id": recipe_id, "status": 1})
+            detailed_recipe["total_likes"] = likes_count
+
+            detailed_recipes.append(detailed_recipe)
+
+    return detailed_recipes
+
+def get_user_liked_recipe_ids(user_id: str):
+    likes_cursor = db.likes.find({"cust_id": user_id, "status": 1})
+    return [like["recipe_id"] for like in likes_cursor]
+
+def get_user_bookmarked_recipe_ids(user_id: str):
+    bookmarks_cursor = db.bookmarks.find({"cust_id": user_id, "status": 1})
+    return [bookmark["recipe_id"] for bookmark in bookmarks_cursor]
+
+def find_most_common_recipe_ids(liked_recipe_ids: List[str], bookmarked_recipe_ids: List[str]):
+    all_recipe_ids = liked_recipe_ids + bookmarked_recipe_ids
+    return sorted(set(all_recipe_ids), key=lambda x: all_recipe_ids.count(x), reverse=True)[:3]
+
+def get_cuisine_and_difficulty(recipe_ids: List[str]):
+    cuisines = []
+    difficulties = []
+    for recipe_id in recipe_ids:
+        recipe = db.recipes.find_one({"_id": recipe_id})
+        if recipe:
+            cuisines.append(recipe["cuisine"])
+            difficulties.append(recipe["difficulty"])
+    return cuisines, difficulties
+
+def filter_recipes_by_cuisine_or_difficulty(cuisines: List[str], difficulties: List[str]):
+    filtered_recipes = []
+    added_recipe_ids = set()
+
+    for cuisine in cuisines:
+        recipes = db.recipes.find({"cuisine": cuisine})
+        for recipe in recipes:
+            if recipe["_id"] not in added_recipe_ids:
+                recipe["_id"] = str(recipe["_id"])
+                filtered_recipes.append(recipe)
+                added_recipe_ids.add(recipe["_id"])
+
+    for difficulty in difficulties:
+        recipes = db.recipes.find({"difficulty": difficulty})
+        for recipe in recipes:
+            if recipe["_id"] not in added_recipe_ids:
+                recipe["_id"] = str(recipe["_id"])
+                filtered_recipes.append(recipe)
+                added_recipe_ids.add(recipe["_id"])
+
+    return filtered_recipes
+
+
+
+def count_total_likes(recipes: List[dict]):
+    recipes_with_likes = []
+    for recipe in recipes:
+        likes_count = db.likes.count_documents({"recipe_id": recipe["_id"], "status": 1})
+        recipe["total_likes"] = likes_count
+        recipes_with_likes.append(recipe)
+    return recipes_with_likes
+
+def get_top_5_recipes(recipes_with_likes: List[dict]):
+    return sorted(recipes_with_likes, key=lambda x: x["total_likes"], reverse=True)[:5]
+
+    #Recommendation Trial End

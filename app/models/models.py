@@ -83,5 +83,6 @@ class Likes(BaseModel):
 class RecipeReview(BaseModel):
     recipe_id: str
     user_id: str
+    username: str = ''
     comment: str
     rating: float 
