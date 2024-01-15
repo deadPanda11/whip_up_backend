@@ -90,20 +90,26 @@ recipes_folder = 'uploads/recipes'
 @app.get("/getrecipes/")
 async def get_all_recipes(user_data: dict = Depends(get_current_user)):
     recipes = db.recipes.find()
-    
+
     # Convert the recipes from Cursor type to a list of dictionaries
     recipes_list = [recipe for recipe in recipes]
-    
+
     # Convert ObjectIds to string since they're not JSON serializable
     for recipe in recipes_list:
         recipe["_id"] = str(recipe["_id"])
+
+        user = db.users.find_one({"cust_id": recipe["userId"]})
+        if user:
+            recipe["username"] = user.get("cust_username")
+        else:
+            recipe["username"] = " "
 
         # Fetch total likes for each recipe
         likes_count = db.likes.count_documents(
             {"recipe_id": recipe["_id"], "status": 1})
         recipe["total_likes"] = likes_count
 
-    # print(recipes_list)
+    print(recipes_list)
 
     return {"recipes": recipes_list}
 
@@ -125,11 +131,11 @@ async def recipe_image(file_path: str):
 async def get_recipe_by_id(recipe_id: str, user_data: dict = Depends(get_current_user)):
     # Fetch the recipe with the given ID
     recipe = db.recipes.find_one({"_id": recipe_id})
-    
+
     # If recipe not found, raise an HTTP exception with a 404 status code
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
-    
+
     return {"recipe": recipe}
 
 
@@ -141,6 +147,10 @@ async def get_my_recipes(user_data: dict = Depends(get_current_user)):
     recipes = list(db.recipes.find({"userId": userId}))
     for recipe in recipes:
         recipe["_id"] = str(recipe["_id"])
+
+        user = db.users.find_one({"cust_id": recipe["userId"]})
+        if user:
+            recipe["username"] = user.get("cust_username")
 
         # Fetch total likes for each recipe
         likes_count = db.likes.count_documents(
@@ -208,6 +218,10 @@ async def get_bookmarked_recipes(user_data: dict = Depends(get_current_user)):
         for recipe in recipes:
             recipe["_id"] = str(recipe["_id"])
 
+            user = db.users.find_one({"cust_id": recipe["userId"]})
+            if user:
+                recipe["username"] = user.get("cust_username")
+
         # Fetch total likes for each recipe
             likes_count = db.likes.count_documents(
                 {"recipe_id": recipe["_id"], "status": 1})
@@ -265,18 +279,18 @@ async def post_review(review: RecipeReview):
     review_data = review.dict()
     review_data['timestamp'] = datetime.utcnow()
     # Convert string to ObjectId for MongoDB operation
-    
+
     db.reviews.insert_one(review_data)
-    
+
     # Fetch the recipe title and owner's ID
     recipe = db.recipes.find_one({"_id": review.recipe_id})
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
-    
+
     owner_id = recipe['userId']  # This should be the recipe owner's ID
     title = recipe['title']
     id = recipe['_id']
-    
+
     # Create the notification for the recipe owner
     notification_data = {
         "recipient_id": owner_id,
@@ -291,38 +305,35 @@ async def post_review(review: RecipeReview):
     return {"message": "Review posted successfully", "review_id": str(review_data['recipe_id'])}
 
 
-
-from bson import ObjectId
-
 @app.get("/getreviews/{recipe_id}/")
 async def get_reviews(recipe_id: str):
     reviews = list(db.reviews.find({"recipe_id": recipe_id}))
-    
+
     for review in reviews:
         # Assuming 'timestamp' is a datetime object, format it to a date string.
         review['timestamp'] = review['timestamp'].strftime('%Y-%m-%d')
         review['_id'] = str(review['_id'])  # Convert ObjectId to str
-        
+
         # Fetch user information using user_id from the 'users' collection
         user_id = review.get('user_id')
-        print("hello?",user_id)
+        print("hello?", user_id)
         user_info = db.users.find_one({"cust_id": user_id})
         if user_info:
             # Assuming the username is stored in the 'username' field
-            print("name???",user_info['cust_username'])
+            print("name???", user_info['cust_username'])
             review['username'] = user_info.get('cust_username')
 
     reviews.reverse()
     return {"reviews": reviews}
 
 
-#notification
+# notification
 
 @app.get("/notifications/{user_id}")
 async def get_notifications(user_id: str):
     # Ensure that user_id is valid and retrieve notifications
     notifications = list(db.notifications.find({"recipient_id": user_id}))
-    
+
     # Convert all ObjectIds to strings for JSON serialization
     for notification in notifications:
         notification['_id'] = str(notification['_id'])
@@ -333,6 +344,7 @@ async def get_notifications(user_id: str):
 
     return notifications
 
+
 @app.patch("/notifications/{notification_id}/read")
 async def mark_notification_as_read(notification_id: str):
     # Convert string to ObjectId for MongoDB operation
@@ -340,33 +352,31 @@ async def mark_notification_as_read(notification_id: str):
         {"_id": ObjectId(notification_id)},
         {"$set": {"read": True}}
     )
-    
+
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Notification not found")
-    
+
     return {"message": "Notification marked as read"}
 
 
-#Search 
+# Search
 
 @app.on_event("startup")
 async def startup_event():
-   
+
     # Create text indexes, if they don't exist already
     try:
         db.recipes.create_index([
             ('title', 'text'),
             ('cuisine', 'text'),
             ('tags', 'text')
-            #('ingredients.name', 'text')
+            # ('ingredients.name', 'text')
         ])
         print("Text indexes created.")
     except OperationFailure as e:
         print("An error occurred while creating indexes:", e)
 
 
-
-        
 @app.get("/search/")
 def search(query: str,  user_data: dict = Depends(get_current_user)):
     if not query:
@@ -374,7 +384,7 @@ def search(query: str,  user_data: dict = Depends(get_current_user)):
 
     # Perform a text search on the 'recipes' collection using the provided 'query'
     recipes_cursor = db.recipes.find({"$text": {"$search": query}})
-    
+
     # Convert the cursor to a list
     recipes_list = []
     for recipe in recipes_cursor:
@@ -391,7 +401,8 @@ def search(query: str,  user_data: dict = Depends(get_current_user)):
     response = {"results": recipes_list}
     return response
 
-    #Recommendation Trial Start
+    # Recommendation Trial Start
+
 
 @app.get("/recommendations/")
 async def get_top_liked_recipes(
@@ -403,7 +414,8 @@ async def get_top_liked_recipes(
     bookmarked_recipe_ids = get_user_bookmarked_recipe_ids(user_id)
 
     # Find the 3 most common recipe ids from likes and bookmarks
-    common_recipe_ids = find_most_common_recipe_ids(liked_recipe_ids, bookmarked_recipe_ids)
+    common_recipe_ids = find_most_common_recipe_ids(
+        liked_recipe_ids, bookmarked_recipe_ids)
     print("Common Recipe Ids: ", common_recipe_ids)
 
     # Get cuisine and difficulty for these recipe ids
@@ -412,7 +424,8 @@ async def get_top_liked_recipes(
     print("Difficulties: ", difficulties)
 
     # Filter recipes based on matching cuisine or difficulty
-    filtered_recipes = filter_recipes_by_cuisine_or_difficulty(cuisines, difficulties)
+    filtered_recipes = filter_recipes_by_cuisine_or_difficulty(
+        cuisines, difficulties)
     print("\nFiltered Recipes:")
     for recipe in filtered_recipes:
         print(recipe.get("title", "No Title"))
@@ -446,7 +459,11 @@ async def get_top_liked_recipes(
     print("\nMore Details:")
     for recipe in detailed_top_liked_recipes:
         print(recipe.get("title", "No Title"))
-
+        user = db.users.find_one({"cust_id": recipe["userId"]})
+        if user:
+            recipe["username"] = user.get("cust_username")
+        else:
+            recipe["username"] = " "
     return {"recipes": detailed_top_liked_recipes}
 
 
@@ -458,24 +475,29 @@ def fetch_detailed_recipes_info(recipes: List[dict]):
 
         if detailed_recipe:
             detailed_recipe["_id"] = str(detailed_recipe["_id"])
-            likes_count = db.likes.count_documents({"_id": recipe_id, "status": 1})
+            likes_count = db.likes.count_documents(
+                {"_id": recipe_id, "status": 1})
             detailed_recipe["total_likes"] = likes_count
 
             detailed_recipes.append(detailed_recipe)
 
     return detailed_recipes
 
+
 def get_user_liked_recipe_ids(user_id: str):
     likes_cursor = db.likes.find({"cust_id": user_id, "status": 1})
     return [like["recipe_id"] for like in likes_cursor]
+
 
 def get_user_bookmarked_recipe_ids(user_id: str):
     bookmarks_cursor = db.bookmarks.find({"cust_id": user_id, "status": 1})
     return [bookmark["recipe_id"] for bookmark in bookmarks_cursor]
 
+
 def find_most_common_recipe_ids(liked_recipe_ids: List[str], bookmarked_recipe_ids: List[str]):
     all_recipe_ids = liked_recipe_ids + bookmarked_recipe_ids
     return sorted(set(all_recipe_ids), key=lambda x: all_recipe_ids.count(x), reverse=True)[:3]
+
 
 def get_cuisine_and_difficulty(recipe_ids: List[str]):
     cuisines = []
@@ -486,6 +508,7 @@ def get_cuisine_and_difficulty(recipe_ids: List[str]):
             cuisines.append(recipe["cuisine"])
             difficulties.append(recipe["difficulty"])
     return cuisines, difficulties
+
 
 def filter_recipes_by_cuisine_or_difficulty(cuisines: List[str], difficulties: List[str]):
     filtered_recipes = []
@@ -510,16 +533,17 @@ def filter_recipes_by_cuisine_or_difficulty(cuisines: List[str], difficulties: L
     return filtered_recipes
 
 
-
 def count_total_likes(recipes: List[dict]):
     recipes_with_likes = []
     for recipe in recipes:
-        likes_count = db.likes.count_documents({"recipe_id": recipe["_id"], "status": 1})
+        likes_count = db.likes.count_documents(
+            {"recipe_id": recipe["_id"], "status": 1})
         recipe["total_likes"] = likes_count
         recipes_with_likes.append(recipe)
     return recipes_with_likes
 
+
 def get_top_5_recipes(recipes_with_likes: List[dict]):
     return sorted(recipes_with_likes, key=lambda x: x["total_likes"], reverse=True)[:5]
 
-    #Recommendation Trial End
+    # Recommendation Trial End
