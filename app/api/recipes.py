@@ -255,7 +255,7 @@ async def change_likes(user_id: str, recipe_id: str):
                 {"cust_id": user_id, "recipe_id": recipe_id},
                 {"$set": {"status": 1}}
             )
-            return {"status": "unliked"}
+            return {"status": "liked"}
 
 
 @app.get("/getlike/{user_id}/{recipe_id}/")
