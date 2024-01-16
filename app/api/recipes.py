@@ -151,6 +151,8 @@ async def get_my_recipes(user_data: dict = Depends(get_current_user)):
         user = db.users.find_one({"cust_id": recipe["userId"]})
         if user:
             recipe["username"] = user.get("cust_username")
+        else:
+            recipe["username"] = " "
 
         # Fetch total likes for each recipe
         likes_count = db.likes.count_documents(
@@ -158,6 +160,27 @@ async def get_my_recipes(user_data: dict = Depends(get_current_user)):
         recipe["total_likes"] = likes_count
 
     print(recipes)
+
+    return {"recipes": recipes}
+
+
+@app.get("/getchefsrecipes/{user_id}/")
+async def get_chefs_recipes(user_id: str):
+
+    recipes = list(db.recipes.find({"userId": user_id}))
+    for recipe in recipes:
+        recipe["_id"] = str(recipe["_id"])
+
+        user = db.users.find_one({"cust_id": recipe["userId"]})
+        if user:
+            recipe["username"] = user.get("cust_username")
+        else:
+            recipe["username"] = " "
+
+        # Fetch total likes for each recipe
+        likes_count = db.likes.count_documents(
+            {"recipe_id": recipe["_id"], "status": 1})
+        recipe["total_likes"] = likes_count
 
     return {"recipes": recipes}
 
@@ -221,6 +244,8 @@ async def get_bookmarked_recipes(user_data: dict = Depends(get_current_user)):
             user = db.users.find_one({"cust_id": recipe["userId"]})
             if user:
                 recipe["username"] = user.get("cust_username")
+            else:
+                recipe["username"] = " "
 
         # Fetch total likes for each recipe
             likes_count = db.likes.count_documents(
