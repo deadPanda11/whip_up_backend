@@ -1,3 +1,4 @@
+from typing import List
 from fastapi import APIRouter, Depends, Form, HTTPException,  File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from app.api.users import get_current_user
@@ -15,8 +16,13 @@ from fastapi.security import OAuth2PasswordBearer
 from pymongo import MongoClient
 from typing import List
 
+from sse_starlette.sse import EventSourceResponse
+import asyncio
 
 app = APIRouter()
+
+
+
 
 
 @app.post("/addrecipe/")
@@ -156,9 +162,56 @@ async def recipe_image(file_path: str):
 
 # Get Each Recipe
 
+@app.get("/getrecipes/")
+async def get_all_recipes(user_data: dict = Depends(get_current_user)):
+    recipes = db.recipes.find()
+
+    # Convert the recipes from Cursor type to a list of dictionaries
+    recipes_list = [recipe for recipe in recipes]
+
+    # Convert ObjectIds to string since they're not JSON serializable
+    for recipe in recipes_list:
+        recipe["_id"] = str(recipe["_id"])
+
+        user = db.users.find_one({"cust_id": recipe["userId"]})
+        if user:
+            recipe["username"] = user.get("cust_username")
+        else:
+            recipe["username"] = " "
+
+        # Fetch total likes for each recipe
+        likes_count = db.likes.count_documents(
+            {"recipe_id": recipe["_id"], "status": 1})
+        recipe["total_likes"] = likes_count
+
+    print(recipes_list)
+
+    return {"recipes": recipes_list}
+
+@app.get("/getmyrecipes/")
+async def get_my_recipes(user_data: dict = Depends(get_current_user)):
+
+    userId = user_data.get("cust_id")
+
+    recipes = list(db.recipes.find({"userId": userId}))
+    for recipe in recipes:
+        recipe["_id"] = str(recipe["_id"])
+
+        user = db.users.find_one({"cust_id": recipe["userId"]})
+        if user:
+            recipe["username"] = user.get("cust_username")
+
+        # Fetch total likes for each recipe
+        likes_count = db.likes.count_documents(
+            {"recipe_id": recipe["_id"], "status": 1})
+        recipe["total_likes"] = likes_count
+
+    print(recipes)
+
+    return {"recipes": recipes}
 
 @app.get("/getrecipe/{recipe_id}")
-async def get_recipe_by_id(recipe_id: str, user_data: dict = Depends(get_current_user)):
+async def get_recipe_by_id(recipe_id: str):
     # Fetch the recipe with the given ID
     recipe = db.recipes.find_one({"_id": recipe_id})
 
@@ -287,8 +340,13 @@ async def get_bookmarked_recipes(user_data: dict = Depends(get_current_user)):
 
 @app.post("/like/{user_id}/{recipe_id}/")
 async def change_likes(user_id: str, recipe_id: str):
-    like = db.likes.find_one(
-        {'cust_id': user_id, 'recipe_id': recipe_id})
+    like = db.likes.find_one({'cust_id': user_id, 'recipe_id': recipe_id})
+    #user_who_liked = db.users.find_one({"_id": ObjectId(user_id)})
+
+
+    recipe = db.recipes.find_one({"_id": recipe_id})
+    owner_id = recipe['userId'] if recipe else None
+
     if not like:
         like_data = {
             "cust_id": user_id,
@@ -296,22 +354,51 @@ async def change_likes(user_id: str, recipe_id: str):
             "status": 1
         }
         db.likes.insert_one(like_data)
+
+        if owner_id and owner_id != user_id :
+            db.notifications.insert_one({
+                "recipient_id": owner_id,
+                "message": f"someone liked your recipe '{recipe['title']}'!",
+                "recipe_id": recipe_id,
+                "read": False,
+                "timestamp": datetime.utcnow()
+            })
+            
+
         return {"status": "liked"}
-
+    
+# If the like already exists, then toggle the like status
     else:
-        if (like["status"] == 1):
-            db.likes.update_one(
-                {"cust_id": user_id, "recipe_id": recipe_id},
-                {"$set": {"status": 0}}
-            )
-            return {"status": "unliked"}
-        else:
-            db.likes.update_one(
-                {"cust_id": user_id, "recipe_id": recipe_id},
-                {"$set": {"status": 1}}
-            )
-            return {"status": "liked"}
+        new_status = 0 if like["status"] == 1 else 1
+        db.likes.update_one(
+            {"cust_id": user_id, "recipe_id": recipe_id},
+            {"$set": {"status": new_status}}
+        )
 
+ # If the like status is toggled to 'unliked', remove the notification
+        
+        if new_status == 0 and owner_id and owner_id != user_id:
+            db.notifications.delete_one({
+                "recipient_id": owner_id,
+                "message": f"Someone liked your recipe '{recipe['title']}'!",
+                "recipe_id": recipe_id,
+            })
+
+            # If the like status is toggled to 'liked', add a notification
+
+        elif new_status == 1 and owner_id and owner_id != user_id:
+            db.notifications.insert_one({
+                "recipient_id": owner_id,
+                "message": f"Someone liked your recipe '{recipe['title']}'!",
+                "recipe_id": recipe_id,
+                "read": False,
+                "timestamp": datetime.utcnow()
+            })
+
+        # Return the new like status
+        return {"status": "liked" if new_status == 1 else "unliked"}
+
+    
 
 @app.get("/getlike/{user_id}/{recipe_id}/")
 async def get_likes(user_id: str, recipe_id: str):
@@ -346,10 +433,16 @@ async def post_review(review: RecipeReview):
     title = recipe['title']
     id = recipe['_id']
 
+    user = db.users.find_one({"cust_id": review.user_id})
+    if user:
+        username = user.get("cust_username")
+    else:
+        username = " "
+
     # Create the notification for the recipe owner
     notification_data = {
         "recipient_id": owner_id,
-        "message": f"Your recipe '{id}' name '{title}' was reviewed by user {review.user_id}.",
+        "message": f"Your recipe '{title}' was reviewed by user {username}.",
         "recipe_id": review.recipe_id,
         "read": False,
         "timestamp": datetime.utcnow()
@@ -387,7 +480,8 @@ async def get_reviews(recipe_id: str):
 @app.get("/notifications/{user_id}")
 async def get_notifications(user_id: str):
     # Ensure that user_id is valid and retrieve notifications
-    notifications = list(db.notifications.find({"recipient_id": user_id}))
+    notifications = list(db.notifications.find(
+        {"recipient_id": user_id}).sort("timestamp", -1).limit(10))
 
     # Convert all ObjectIds to strings for JSON serialization
     for notification in notifications:
@@ -413,6 +507,23 @@ async def mark_notification_as_read(notification_id: str):
 
     return {"message": "Notification marked as read"}
 
+@app.get("/notifications/{user_id}/count")
+async def get_unread_notification_count(user_id: str):
+    count = db.notifications.count_documents({"recipient_id": user_id, "read": False})
+    return {"unread_count": count}
+
+
+@app.patch("/notifications/mark-all-read/{user_id}")
+async def mark_all_notifications_as_read(user_id: str):
+    result = db.notifications.update_many(
+        {"recipient_id": user_id, "read": False},
+        {"$set": {"read": True}}
+    )
+    
+    if result.modified_count == 0:
+        return {"message": "No notifications updated"}
+    
+    return {"message": f"All notifications marked as read, count: {result.modified_count}"}
 
 # Search
 
@@ -446,9 +557,10 @@ def search(query: str,  user_data: dict = Depends(get_current_user)):
         recipe_id = str(recipe['_id'])  # Convert ObjectId to string
         print(f"Recipe ID: {recipe_id}")  # Print the ID
         recipe['_id'] = recipe_id
-
         likes_count = db.likes.count_documents(
-            {"recipe_id": recipe_id, "status": 1})
+            {"recipe_id": recipe_id , "status" : 1}
+        )
+        
         recipe["total_likes"] = likes_count
 
         user = db.users.find_one({"cust_id": recipe["userId"]})
@@ -537,29 +649,24 @@ def fetch_detailed_recipes_info(recipes: List[dict]):
 
         if detailed_recipe:
             detailed_recipe["_id"] = str(detailed_recipe["_id"])
-            likes_count = db.likes.count_documents(
-                {"_id": recipe_id, "status": 1})
+            likes_count = db.likes.count_documents({"_id": recipe_id, "status": 1})
             detailed_recipe["total_likes"] = likes_count
 
             detailed_recipes.append(detailed_recipe)
 
     return detailed_recipes
 
-
 def get_user_liked_recipe_ids(user_id: str):
     likes_cursor = db.likes.find({"cust_id": user_id, "status": 1})
     return [like["recipe_id"] for like in likes_cursor]
-
 
 def get_user_bookmarked_recipe_ids(user_id: str):
     bookmarks_cursor = db.bookmarks.find({"cust_id": user_id, "status": 1})
     return [bookmark["recipe_id"] for bookmark in bookmarks_cursor]
 
-
 def find_most_common_recipe_ids(liked_recipe_ids: List[str], bookmarked_recipe_ids: List[str]):
     all_recipe_ids = liked_recipe_ids + bookmarked_recipe_ids
     return sorted(set(all_recipe_ids), key=lambda x: all_recipe_ids.count(x), reverse=True)[:3]
-
 
 def get_cuisine_and_difficulty(recipe_ids: List[str]):
     cuisines = []
@@ -570,7 +677,6 @@ def get_cuisine_and_difficulty(recipe_ids: List[str]):
             cuisines.append(recipe["cuisine"])
             difficulties.append(recipe["difficulty"])
     return cuisines, difficulties
-
 
 def filter_recipes_by_cuisine_or_difficulty(cuisines: List[str], difficulties: List[str]):
     filtered_recipes = []
@@ -595,17 +701,15 @@ def filter_recipes_by_cuisine_or_difficulty(cuisines: List[str], difficulties: L
     return filtered_recipes
 
 
+
 def count_total_likes(recipes: List[dict]):
     recipes_with_likes = []
     for recipe in recipes:
-        likes_count = db.likes.count_documents(
-            {"recipe_id": recipe["_id"], "status": 1})
+        likes_count = db.likes.count_documents({"recipe_id": recipe["_id"], "status": 1})
         recipe["total_likes"] = likes_count
         recipes_with_likes.append(recipe)
     return recipes_with_likes
 
-
 def get_top_5_recipes(recipes_with_likes: List[dict]):
     return sorted(recipes_with_likes, key=lambda x: x["total_likes"], reverse=True)[:5]
-
-    # Recommendation Trial End
+    
