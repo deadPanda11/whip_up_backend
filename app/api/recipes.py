@@ -15,8 +15,8 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from pymongo import MongoClient
 from typing import List
+from PIL import Image
 
-from sse_starlette.sse import EventSourceResponse
 import asyncio
 
 app = APIRouter()
@@ -115,8 +115,6 @@ async def get_all_recipes(user_data: dict = Depends(get_current_user)):
             {"recipe_id": recipe["_id"], "status": 1})
         recipe["total_likes"] = likes_count
 
-    print("CHECK HERE: ", recipes_list)
-
     return {"recipes": recipes_list}
 
 
@@ -144,10 +142,7 @@ async def get_all_recipes(user_data: dict = Depends(get_current_user)):
             {"recipe_id": recipe["_id"], "status": 1})
         recipe["total_likes"] = likes_count
 
-    print(recipes_list)
-
     return {"recipes": recipes_list}
-
 
 
 @app.get("/recipe-image/{file_path:path}")
@@ -156,9 +151,27 @@ async def recipe_image(file_path: str):
     full_path = os.path.join(recipes_folder, file_name)
 
     if os.path.isfile(full_path):
+        # Open the original image using Pillow
+        original_image = Image.open(full_path)
+
+        # Compress the image (adjust quality as needed)
+        compressed_image = original_image.copy()
+        compressed_image.save(full_path, quality=30)
+
+        # Return the compressed image as a response
         return FileResponse(full_path)
     else:
         raise HTTPException(status_code=404, detail="File not found")
+
+# @app.get("/recipe-image/{file_path:path}")
+# async def recipe_image(file_path: str):
+#     file_name = os.path.basename(file_path)
+#     full_path = os.path.join(recipes_folder, file_name)
+
+#     if os.path.isfile(full_path):
+#         return FileResponse(full_path)
+#     else:
+#         raise HTTPException(status_code=404, detail="File not found")
 
 # Get Each Recipe
 
@@ -184,7 +197,6 @@ async def get_all_recipes(user_data: dict = Depends(get_current_user)):
             {"recipe_id": recipe["_id"], "status": 1})
         recipe["total_likes"] = likes_count
 
-    print(recipes_list)
 
     return {"recipes": recipes_list}
 
@@ -206,8 +218,6 @@ async def get_my_recipes(user_data: dict = Depends(get_current_user)):
             {"recipe_id": recipe["_id"], "status": 1})
         recipe["total_likes"] = likes_count
 
-    print(recipes)
-
     return {"recipes": recipes}
 
 @app.get("/getrecipe/{recipe_id}")
@@ -218,6 +228,12 @@ async def get_recipe_by_id(recipe_id: str):
     # If recipe not found, raise an HTTP exception with a 404 status code
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
+
+    user = db.users.find_one({"cust_id": recipe["userId"]})
+    if user:
+        recipe["username"] = user.get("cust_username")
+    else:
+        recipe["username"] = " "
 
     return {"recipe": recipe}
 
@@ -242,7 +258,6 @@ async def get_my_recipes(user_data: dict = Depends(get_current_user)):
             {"recipe_id": recipe["_id"], "status": 1})
         recipe["total_likes"] = likes_count
 
-    print(recipes)
 
     return {"recipes": recipes}
 
@@ -358,7 +373,7 @@ async def change_likes(user_id: str, recipe_id: str):
         if owner_id and owner_id != user_id :
             db.notifications.insert_one({
                 "recipient_id": owner_id,
-                "message": f"someone liked your recipe '{recipe['title']}'!",
+                "message": f"Someone liked your recipe '{recipe['title']}'!",
                 "recipe_id": recipe_id,
                 "read": False,
                 "timestamp": datetime.utcnow()
@@ -445,7 +460,7 @@ async def post_review(review: RecipeReview):
         "message": f"Your recipe '{title}' was reviewed by user {username}.",
         "recipe_id": review.recipe_id,
         "read": False,
-        "timestamp": datetime.utcnow()
+        "timestamp": datetime.utcnow(),
     }
     # Insert the notification into the database
     db.notifications.insert_one(notification_data)
@@ -572,7 +587,7 @@ def search(query: str,  user_data: dict = Depends(get_current_user)):
         recipes_list.append(recipe)
 
     response = {"results": recipes_list}
-    print(response)
+
     return response
 
     # Recommendation Trial Start
@@ -590,37 +605,37 @@ async def get_top_liked_recipes(
     # Find the 3 most common recipe ids from likes and bookmarks
     common_recipe_ids = find_most_common_recipe_ids(
         liked_recipe_ids, bookmarked_recipe_ids)
-    print("Common Recipe Ids: ", common_recipe_ids)
+    #print("Common Recipe Ids: ", common_recipe_ids)
 
     # Get cuisine and difficulty for these recipe ids
     cuisines, difficulties = get_cuisine_and_difficulty(common_recipe_ids)
-    print("Cuisines: ", cuisines)
-    print("Difficulties: ", difficulties)
+    # print("Cuisines: ", cuisines)
+    # print("Difficulties: ", difficulties)
 
     # Filter recipes based on matching cuisine or difficulty
     filtered_recipes = filter_recipes_by_cuisine_or_difficulty(
         cuisines, difficulties)
-    print("\nFiltered Recipes:")
-    for recipe in filtered_recipes:
-        print(recipe.get("title", "No Title"))
+    # print("\nFiltered Recipes:")
+    # for recipe in filtered_recipes:
+    #     print(recipe.get("title", "No Title"))
 
     # Count total likes for filtered recipes
     recipes_with_likes = count_total_likes(filtered_recipes)
-    print("\nRecipes With Likes:")
-    for recipe in recipes_with_likes:
-        print(recipe.get("title", "No Title"))
+    # print("\nRecipes With Likes:")
+    # for recipe in recipes_with_likes:
+    #     print(recipe.get("title", "No Title"))
 
     # Sort recipes by total likes and get the top 5
     top_liked_recipes = get_top_5_recipes(recipes_with_likes)
-    print("\nTop 5:")
-    for recipe in top_liked_recipes:
-        print(recipe.get("title", "No Title"))
+    # print("\nTop 5:")
+    # for recipe in top_liked_recipes:
+    #     print(recipe.get("title", "No Title"))
 
     # Fetch additional details for the top-liked recipes
     detailed_top_liked_recipes = fetch_detailed_recipes_info(top_liked_recipes)
-    print("\nDetails:")
-    for recipe in detailed_top_liked_recipes:
-        print(recipe.get("title", "No Title"))
+    # print("\nDetails:")
+    # for recipe in detailed_top_liked_recipes:
+    #     print(recipe.get("title", "No Title"))
 
     for recipe in detailed_top_liked_recipes:
         recipe["_id"] = str(recipe["_id"])
@@ -630,9 +645,9 @@ async def get_top_liked_recipes(
             {"recipe_id": recipe["_id"], "status": 1})
         recipe["total_likes"] = likes_count
 
-    print("\nMore Details:")
+    # print("\nMore Details:")
     for recipe in detailed_top_liked_recipes:
-        print(recipe.get("title", "No Title"))
+        # print(recipe.get("title", "No Title"))
         user = db.users.find_one({"cust_id": recipe["userId"]})
         if user:
             recipe["username"] = user.get("cust_username")
