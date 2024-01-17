@@ -472,6 +472,23 @@ async def mark_notification_as_read(notification_id: str):
 
     return {"message": "Notification marked as read"}
 
+@app.get("/notifications/{user_id}/count")
+async def get_unread_notification_count(user_id: str):
+    count = db.notifications.count_documents({"recipient_id": user_id, "read": False})
+    return {"unread_count": count}
+
+
+@app.patch("/notifications/mark-all-read/{user_id}")
+async def mark_all_notifications_as_read(user_id: str):
+    result = db.notifications.update_many(
+        {"recipient_id": user_id, "read": False},
+        {"$set": {"read": True}}
+    )
+    
+    if result.modified_count == 0:
+        return {"message": "No notifications updated"}
+    
+    return {"message": f"All notifications marked as read, count: {result.modified_count}"}
 
 # Search
 
