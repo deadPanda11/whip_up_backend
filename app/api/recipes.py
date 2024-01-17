@@ -109,9 +109,39 @@ async def get_all_recipes(user_data: dict = Depends(get_current_user)):
             {"recipe_id": recipe["_id"], "status": 1})
         recipe["total_likes"] = likes_count
 
+    print("CHECK HERE: ", recipes_list)
+
+    return {"recipes": recipes_list}
+
+
+from pymongo import DESCENDING
+
+@app.get("/latestrecipes/")
+async def get_all_recipes(user_data: dict = Depends(get_current_user)):
+    recipes_cursor = db.recipes.find().sort("_id", DESCENDING).limit(6)
+
+    # Convert the recipes from Cursor type to a list of dictionaries
+    recipes_list = [recipe for recipe in recipes_cursor]
+
+    # Convert ObjectIds to string since they're not JSON serializable
+    for recipe in recipes_list:
+        recipe["_id"] = str(recipe["_id"])
+
+        user = db.users.find_one({"cust_id": recipe["userId"]})
+        if user:
+            recipe["username"] = user.get("cust_username")
+        else:
+            recipe["username"] = " "
+
+        # Fetch total likes for each recipe
+        likes_count = db.likes.count_documents(
+            {"recipe_id": recipe["_id"], "status": 1})
+        recipe["total_likes"] = likes_count
+
     print(recipes_list)
 
     return {"recipes": recipes_list}
+
 
 
 @app.get("/recipe-image/{file_path:path}")
@@ -421,9 +451,16 @@ def search(query: str,  user_data: dict = Depends(get_current_user)):
             {"recipe_id": recipe_id, "status": 1})
         recipe["total_likes"] = likes_count
 
+        user = db.users.find_one({"cust_id": recipe["userId"]})
+        if user:
+            recipe["username"] = user.get("cust_username")
+        else:
+            recipe["username"] = " "
+
         recipes_list.append(recipe)
 
     response = {"results": recipes_list}
+    print(response)
     return response
 
     # Recommendation Trial Start
