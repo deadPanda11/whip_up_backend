@@ -398,17 +398,21 @@ async def post_review(review: RecipeReview):
     recipe = db.recipes.find_one({"_id": review.recipe_id})
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
-    
+
     owner_id = recipe['userId']  # This should be the recipe owner's ID
     title = recipe['title']
     id = recipe['_id']
-    
-    
+
+    user = db.users.find_one({"cust_id": review.user_id})
+    if user:
+        username = user.get("cust_username")
+    else:
+        username = " "
 
     # Create the notification for the recipe owner
     notification_data = {
         "recipient_id": owner_id,
-        "message": f"Your recipe '{title}' was reviewed by user {review.user_id}.",
+        "message": f"Your recipe '{title}' was reviewed by user {username}.",
         "recipe_id": review.recipe_id,
         "read": False,
         "timestamp": datetime.utcnow()
@@ -446,8 +450,9 @@ async def get_reviews(recipe_id: str):
 @app.get("/notifications/{user_id}")
 async def get_notifications(user_id: str):
     # Ensure that user_id is valid and retrieve notifications
-    notifications = list(db.notifications.find({"recipient_id": user_id}).sort("timestamp", -1).limit(10))
-    
+    notifications = list(db.notifications.find(
+        {"recipient_id": user_id}).sort("timestamp", -1).limit(10))
+
     # Convert all ObjectIds to strings for JSON serialization
     for notification in notifications:
         notification['_id'] = str(notification['_id'])
@@ -541,7 +546,8 @@ async def get_top_liked_recipes(
     bookmarked_recipe_ids = get_user_bookmarked_recipe_ids(user_id)
 
     # Find the 3 most common recipe ids from likes and bookmarks
-    common_recipe_ids = find_most_common_recipe_ids(liked_recipe_ids, bookmarked_recipe_ids)
+    common_recipe_ids = find_most_common_recipe_ids(
+        liked_recipe_ids, bookmarked_recipe_ids)
     print("Common Recipe Ids: ", common_recipe_ids)
 
     # Get cuisine and difficulty for these recipe ids
@@ -550,7 +556,8 @@ async def get_top_liked_recipes(
     print("Difficulties: ", difficulties)
 
     # Filter recipes based on matching cuisine or difficulty
-    filtered_recipes = filter_recipes_by_cuisine_or_difficulty(cuisines, difficulties)
+    filtered_recipes = filter_recipes_by_cuisine_or_difficulty(
+        cuisines, difficulties)
     print("\nFiltered Recipes:")
     for recipe in filtered_recipes:
         print(recipe.get("title", "No Title"))
@@ -584,7 +591,11 @@ async def get_top_liked_recipes(
     print("\nMore Details:")
     for recipe in detailed_top_liked_recipes:
         print(recipe.get("title", "No Title"))
-
+        user = db.users.find_one({"cust_id": recipe["userId"]})
+        if user:
+            recipe["username"] = user.get("cust_username")
+        else:
+            recipe["username"] = " "
     return {"recipes": detailed_top_liked_recipes}
 
 
